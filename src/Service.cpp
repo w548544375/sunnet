@@ -1,5 +1,8 @@
 #include "Service.h"
+#include "BaseMsg.h"
 #include "ServiceMsg.h"
+#include "SocketAcceptMsg.h"
+#include "SocketRWMsg.h"
 #include "Sunnet.h"
 #include <cstddef>
 #include <cstdio>
@@ -8,6 +11,7 @@
 #include <memory>
 #include <pthread.h>
 #include <string>
+#include <unistd.h>
 
 Service::Service() {
   // 初始化锁
@@ -49,6 +53,26 @@ void Service::OnExit() {
 }
 
 void Service::OnMsg(std::shared_ptr<BaseMsg> msg) {
+  if (msg->type == BaseMsg::TYPE::SOCKET_ACCEPT) {
+    auto m = std::dynamic_pointer_cast<SocketAcceptMsg>(msg);
+    std::cout << "[Service]OnMsg SOCKET_ACCEPT " << m->listenFd
+              << " client :" << m->clientFd << std::endl;
+  }
+  if (msg->type == BaseMsg::TYPE::SOCKET_RW) {
+
+    auto m = std::dynamic_pointer_cast<SocketRWMsg>(msg);
+    std::cout << "[Service]OnMsg SOCKET_RW" << m->fd << std::endl;
+
+    if (m->isRead) {
+      char buf[512];
+      int len = read(m->fd, &buf, 512);
+      if (len > 0) {
+        char resp[3] = {'l', 'p', 'y'};
+        write(m->fd, &resp, 3);
+      }
+    }
+    std::cout << "[Service]OnMsg " << m->fd << std::endl;
+  }
   if (msg->type == BaseMsg::TYPE::SERVICE) {
     auto m = std::dynamic_pointer_cast<ServiceMsg>(msg);
     std::cout << "[" << id << "]"

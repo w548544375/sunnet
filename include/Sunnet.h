@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 class Worker;
+class SocketWorker;
+class Conn;
 namespace std {
 class thread;
 }
@@ -36,6 +38,13 @@ public:
   void CheckAndWakeUp();
   void WorkerWait();
 
+  int AddConn(int fd, uint32_t serviceId, uint8_t type);
+  std::shared_ptr<Conn> GetConn(int fd);
+  bool RemoveConn(int fd);
+
+  int Listen(uint32_t port, uint32_t serviceId);
+  void CloseConn(int fd);
+
 public:
   std::unordered_map<uint32_t, std::shared_ptr<Service>> services;
   uint32_t maxId = 0;
@@ -47,6 +56,7 @@ private:
   std::vector<std::thread *> workerThreads;
 
   void startWorker();
+  void startSocketWorker();
 
   std::shared_ptr<Service> GetService(uint32_t id);
 
@@ -57,6 +67,14 @@ private:
   pthread_mutex_t sleepMtx;
   pthread_cond_t sleepCond;
   int sleepCount = 0;
+
+  // socket worker
+  SocketWorker *socketWorker;
+  std::thread *socketThread;
+
+  // managed conn
+  std::unordered_map<uint32_t, std::shared_ptr<Conn>> conns;
+  pthread_rwlock_t connLock;
 };
 
 #endif // !__SUNNET_H__

@@ -22,11 +22,17 @@ void test() {
   Sunnet::inst->Send(pong, ping2Msg);
   Sunnet::inst->Send(ping1, pongMsg);
 }
+void testSocket() {
+  auto pingType = std::make_shared<std::string>("ping");
+  uint32_t serv = Sunnet::inst->NewService(pingType);
+  int fd = Sunnet::inst->Listen(7788, serv);
+}
 
 int main() {
   new Sunnet();
   Sunnet::inst->Start();
-  test();
+  //  test();
+  testSocket();
   Sunnet::inst->Wait();
   return 0;
 }

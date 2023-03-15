@@ -1,14 +1,17 @@
 #include "Sunnet.h"
 #include "BaseMsg.h"
+#include "Conn.h"
 #include "Service.h"
 #include "ServiceMsg.h"
+#include "SocketWorker.h"
 #include "Worker.h"
 #include "unistd.h"
-#include <cstdint>
+#include <arpa/inet.h>
+#include <assert.h>
+#include <fcntl.h>
 #include <iostream>
-#include <memory>
-#include <pthread.h>
-#include <thread>
+#include <netinet/in.h>
+#include <sys/socket.h>
 using namespace std;
 
 Sunnet *Sunnet::inst;
@@ -20,6 +23,7 @@ Sunnet::~Sunnet() {
   pthread_spin_destroy(&globalLock);
   pthread_cond_destroy(&sleepCond);
   pthread_mutex_destroy(&sleepMtx);
+  pthread_rwlock_destroy(&connLock);
 }
 
 void Sunnet::Start() {
@@ -28,7 +32,9 @@ void Sunnet::Start() {
   pthread_spin_init(&globalLock, PTHREAD_PROCESS_PRIVATE);
   pthread_cond_init(&sleepCond, NULL);
   pthread_mutex_init(&sleepMtx, NULL);
+  assert(pthread_rwlock_init(&connLock, NULL) == 0);
   startWorker();
+  startSocketWorker();
 }
 
 void Sunnet::startWorker() {
@@ -44,6 +50,12 @@ void Sunnet::startWorker() {
     workers.push_back(worker);
     workerThreads.push_back(workThread);
   }
+}
+
+void Sunnet::startSocketWorker() {
+  socketWorker = new SocketWorker();
+  socketWorker->Init();
+  socketThread = new thread(*socketWorker);
 }
 
 void Sunnet::Wait() {
@@ -151,4 +163,80 @@ void Sunnet::CheckAndWakeUp() {
     cout << "wake up" << endl;
     pthread_cond_signal(&sleepCond);
   }
+}
+
+int Sunnet::AddConn(int fd, uint32_t serviceId, uint8_t type) {
+  auto conn = make_shared<Conn>();
+  conn->fd = fd;
+  conn->serviceId = serviceId;
+  conn->type = type;
+
+  pthread_rwlock_wrlock(&connLock);
+  conns.emplace(fd, conn);
+  pthread_rwlock_unlock(&connLock);
+  return fd;
+}
+
+std::shared_ptr<Conn> Sunnet::GetConn(int fd) {
+  std::shared_ptr<Conn> conn = NULL;
+  pthread_rwlock_rdlock(&connLock);
+  std::unordered_map<uint32_t, std::shared_ptr<Conn>>::iterator iter =
+      conns.find(fd);
+  if (iter != conns.end()) {
+    conn = iter->second;
+  }
+  pthread_rwlock_unlock(&connLock);
+  return conn;
+}
+
+bool Sunnet::RemoveConn(int fd) {
+  int result;
+  pthread_rwlock_rdlock(&connLock);
+  result = conns.erase(fd);
+  pthread_rwlock_unlock(&connLock);
+  return result == 1;
+}
+
+int Sunnet::Listen(uint32_t port, uint32_t serviceId) {
+  int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (listenfd <= 0) {
+    std::cout << "[Sunnet]Listen error,create listen socket error !"
+              << std::endl;
+    return -1;
+  }
+  fcntl(listenfd, F_SETFL, O_NONBLOCK);
+  // bind
+  struct sockaddr_in addr;
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = INADDR_ANY;
+
+  int ret = bind(listenfd, (struct sockaddr *)&addr, sizeof(addr));
+  if (ret == -1) {
+    std::cout << "[Sunnet]Listen error,bind socket error!" << std::endl;
+    return -1;
+  }
+
+  ret = listen(listenfd, 64);
+  if (ret == -1) {
+    std::cout << "[Sunnet]Listen error,listen socket error!" << std::endl;
+    return -1;
+  }
+
+  AddConn(listenfd, serviceId, Conn::TYPE::SERVER);
+
+  socketWorker->AddEvent(listenfd);
+
+  return listenfd;
+}
+
+void Sunnet::CloseConn(int fd) {
+  bool removed = RemoveConn(fd);
+  if (removed) {
+    socketWorker->RemoveEvent(fd);
+  }
+  close(fd);
+  std::string eventRemoved =
+      removed ? "Event Removed." : "Event did not removed!";
+  std::cout << "[Sunnet]CloseConn," << eventRemoved << std::endl;
 }
