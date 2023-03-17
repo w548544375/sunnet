@@ -1,6 +1,9 @@
 #pragma once
-
 #include "BaseMsg.h"
+#include "ServiceMsg.h"
+#include "SocketAcceptMsg.h"
+#include "SocketRWMsg.h"
+#include "lua.hpp"
 #include <cstdint>
 #include <memory>
 #include <pthread.h>
@@ -35,4 +38,15 @@ public:
 
 private:
   std::shared_ptr<BaseMsg> PopMsg();
+
+  void OnServiceMsg(std::shared_ptr<ServiceMsg> msg);
+  void OnAcceptMsg(std::shared_ptr<SocketAcceptMsg> msg);
+  void OnRWMsg(std::shared_ptr<SocketRWMsg> msg);
+
+  // RW msg 细分
+  void OnSocketData(int fd, const char *buff, int len);
+  void OnSocketWritable(int fd);
+  void OnSocketClose(int fd);
+
+  lua_State *luaState;
 };

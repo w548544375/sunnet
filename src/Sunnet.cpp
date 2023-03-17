@@ -8,10 +8,16 @@
 #include "unistd.h"
 #include <arpa/inet.h>
 #include <assert.h>
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
 #include <fcntl.h>
 #include <iostream>
+#include <memory>
 #include <netinet/in.h>
+#include <signal.h>
 #include <sys/socket.h>
+#include <unordered_map>
 using namespace std;
 
 Sunnet *Sunnet::inst;
@@ -24,10 +30,17 @@ Sunnet::~Sunnet() {
   pthread_cond_destroy(&sleepCond);
   pthread_mutex_destroy(&sleepMtx);
   pthread_rwlock_destroy(&connLock);
+  std::unordered_map<uint32_t, std::shared_ptr<Conn>>::iterator it;
+  for (it = conns.begin(); it != conns.end(); it++) {
+    close(it->first);
+  }
+  std::cout << "[Sunnet]~Sunnet()\n";
 }
 
 void Sunnet::Start() {
   cout << "Hello Sunnect" << endl;
+  // 忽略复位信号
+  signal(SIGPIPE, SIG_IGN);
   pthread_rwlock_init(&servicesLock, NULL);
   pthread_spin_init(&globalLock, PTHREAD_PROCESS_PRIVATE);
   pthread_cond_init(&sleepCond, NULL);
@@ -204,6 +217,8 @@ int Sunnet::Listen(uint32_t port, uint32_t serviceId) {
               << std::endl;
     return -1;
   }
+  std::cout << "[Sunnet]Listen fd is " << listenfd << std::endl;
+
   fcntl(listenfd, F_SETFL, O_NONBLOCK);
   // bind
   struct sockaddr_in addr;
@@ -213,13 +228,15 @@ int Sunnet::Listen(uint32_t port, uint32_t serviceId) {
 
   int ret = bind(listenfd, (struct sockaddr *)&addr, sizeof(addr));
   if (ret == -1) {
-    std::cout << "[Sunnet]Listen error,bind socket error!" << std::endl;
+    std::cout << "[Sunnet]Listen error,bind socket error:"
+              << std::strerror(errno) << std::endl;
     return -1;
   }
 
   ret = listen(listenfd, 64);
   if (ret == -1) {
-    std::cout << "[Sunnet]Listen error,listen socket error!" << std::endl;
+    std::cout << "[Sunnet]Listen error,listen socket error:"
+              << std::strerror(errno) << std::endl;
     return -1;
   }
 
@@ -239,4 +256,8 @@ void Sunnet::CloseConn(int fd) {
   std::string eventRemoved =
       removed ? "Event Removed." : "Event did not removed!";
   std::cout << "[Sunnet]CloseConn," << eventRemoved << std::endl;
+}
+
+void Sunnet::ModifyEvent(int fd, bool epollout) {
+  socketWorker->ModifyEvent(fd, epollout);
 }

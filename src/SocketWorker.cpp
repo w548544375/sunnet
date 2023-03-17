@@ -12,13 +12,15 @@
 #include <iostream>
 #include <memory>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 void SocketWorker::Init() {
   std::cout << "[SockerWorker]Init" << std::endl;
   epollfd = epoll_create(1024);
   assert(epollfd > 0);
-  std::cout << "[SocketWorker] Init ,created fd is " << epollfd << std::endl;
+  std::cout << "[SocketWorker] Init ,created epollfd is " << epollfd
+            << std::endl;
 }
 
 void SocketWorker::operator()() {
@@ -81,8 +83,9 @@ void SocketWorker::onEvent(epoll_event ev) {
   bool isWrite = ev.events & EPOLLOUT;
   bool isError = ev.events & EPOLLERR;
 
-  std::cout << "[SocketWorker]onEvent " << fd << " isRead:" << isRead
-            << " isWrite:" << isWrite << " isError:" << isError << std::endl;
+  std::cout << "[SocketWorker]onEvent " << fd << "(isRead:" << isRead
+            << " isWrite:" << isWrite << " isError:" << isError << ")"
+            << std::endl;
   if (conn->type == Conn::TYPE::SERVER) {
     if (isRead) {
       onAccept(conn);
@@ -98,24 +101,25 @@ void SocketWorker::onEvent(epoll_event ev) {
 }
 
 void SocketWorker::onAccept(std::shared_ptr<Conn> conn) {
-  std::cout << "[SocketWorker]onAccept " << conn->fd << std::endl;
-  int clientFd = conn->fd;
+  int clientFd = accept(conn->fd, NULL, NULL);
   fcntl(clientFd, F_SETFL, O_NONBLOCK);
+  std::cout << "[SocketWorker]onAccept " << conn->fd << " accepted client "
+            << clientFd << std::endl;
 
-  Sunnet::inst->AddConn(clientFd, conn->serviceId, conn->type);
+  Sunnet::inst->AddConn(clientFd, conn->serviceId, Conn::TYPE::CLIENT);
 
   // 添加事件
   struct epoll_event ev;
   ev.data.fd = clientFd;
-  ev.events = EPOLLET | EPOLLOUT;
+  ev.events = EPOLLET | EPOLLIN;
 
   if (epoll_ctl(epollfd, EPOLL_CTL_ADD, clientFd, &ev) == -1) {
-    std::cout << "[SocketWorker]onAccept epoll_ctl failed: " << clientFd << " "
+    std::cout << "[SocketWorker]onAccept epoll_ctl failed: " << clientFd << ": "
               << std::strerror(errno) << std::endl;
   }
 
   auto msg = std::make_shared<SocketAcceptMsg>();
-  msg->listenFd = epollfd;
+  msg->listenFd = conn->fd;
   msg->clientFd = clientFd;
   msg->type = BaseMsg::TYPE::SOCKET_ACCEPT;
   Sunnet::inst->Send(conn->serviceId, msg);

@@ -45,6 +45,8 @@ public:
   int Listen(uint32_t port, uint32_t serviceId);
   void CloseConn(int fd);
 
+  void ModifyEvent(int fd, bool epollout);
+
 public:
   std::unordered_map<uint32_t, std::shared_ptr<Service>> services;
   uint32_t maxId = 0;

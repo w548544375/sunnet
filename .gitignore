@@ -3,4 +3,6 @@
 /.cache
 compile_commands.json
 compile_commands.txt
+*.o
+*.a
 
